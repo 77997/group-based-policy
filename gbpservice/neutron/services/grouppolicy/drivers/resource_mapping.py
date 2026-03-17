@@ -161,7 +161,7 @@ class OwnedResourcesOperations(object):
     # by creating a resource to DB class name mapping.
 
     def _mark_port_owned(self, session, port_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             owned = OwnedPort(port_id=port_id)
             session.add(owned)
 
@@ -172,7 +172,7 @@ class OwnedResourcesOperations(object):
                     first() is not None)
 
     def _mark_subnet_owned(self, session, subnet_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             owned = OwnedSubnet(subnet_id=subnet_id)
             session.add(owned)
 
@@ -183,7 +183,7 @@ class OwnedResourcesOperations(object):
                     first() is not None)
 
     def _mark_network_owned(self, session, network_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             owned = OwnedNetwork(network_id=network_id)
             session.add(owned)
 
@@ -194,7 +194,7 @@ class OwnedResourcesOperations(object):
                     first() is not None)
 
     def _mark_router_owned(self, session, router_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             owned = OwnedRouter(router_id=router_id)
             session.add(owned)
 
@@ -205,7 +205,7 @@ class OwnedResourcesOperations(object):
                     first() is not None)
 
     def _mark_address_scope_owned(self, session, address_scope_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             owned = OwnedAddressScope(address_scope_id=address_scope_id)
             session.add(owned)
 
@@ -216,7 +216,7 @@ class OwnedResourcesOperations(object):
                     first() is not None)
 
     def _mark_subnetpool_owned(self, session, subnetpool_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             owned = OwnedSubnetpool(subnetpool_id=subnetpool_id)
             session.add(owned)
 
@@ -2698,7 +2698,7 @@ class ResourceMappingDriver(api.PolicyDriver, ImplicitResourceOperations,
 
     def _set_policy_rule_set_sg_mapping(
         self, session, policy_rule_set_id, consumed_sg_id, provided_sg_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             mapping = PolicyRuleSetSGsMapping(
                 policy_rule_set_id=policy_rule_set_id,
                 consumed_sg_id=consumed_sg_id, provided_sg_id=provided_sg_id)

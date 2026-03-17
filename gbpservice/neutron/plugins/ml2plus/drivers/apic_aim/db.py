@@ -494,7 +494,7 @@ class DbMixin(object):
         return query(session).all()
 
     def _set_vm_name(self, session, device_id, vm_name):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             db_obj = self._get_vm_name(session, device_id,
                                        is_detailed=True)
             if db_obj:
@@ -504,7 +504,7 @@ class DbMixin(object):
             session.add(db_obj)
 
     def _delete_vm_name(self, session, device_id):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             db_obj = self._get_vm_name(session, device_id,
                                        is_detailed=True)
             if db_obj:
@@ -519,7 +519,7 @@ class DbMixin(object):
     def _set_vm_name_update(self, session, db_obj, host_id,
                             last_incremental_update_time,
                             last_full_update_time=None):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             if db_obj:
                 db_obj.host_id = host_id
                 db_obj.last_incremental_update_time = (

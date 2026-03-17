@@ -78,6 +78,7 @@ def run_migrations_online():
     try:
         with context.begin_transaction():
             context.run_migrations()
+            connection.commit()
     finally:
         connection.close()
         engine.dispose()

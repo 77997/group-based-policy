@@ -128,7 +128,7 @@ class FlowclassifierAIMDriver(FlowclassifierAIMDriverBase):
 
     def _get_classifiers_by_network_id(self, plugin_context, network_id):
         context = plugin_context
-        with context.session.begin(subtransactions=True):
+        with context.session.begin_nested():
             classifier_ids = []
             for keyword in [sfc_cts.LOGICAL_SRC_NET, sfc_cts.LOGICAL_DST_NET]:
                 query = BAKERY(lambda s: s.query(

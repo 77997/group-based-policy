@@ -778,9 +778,28 @@ class ApicRpcHandlerMixin(object):
         query += lambda q: q.filter(
             l3_models.FloatingIP.fixed_port_id.in_(sa.bindparam(
                 'port_ids', expanding=True)))
-        return [EndpointFipInfo._make(row) for row in
-                query(session).params(
-                    port_ids=port_ids)]
+        results = [EndpointFipInfo._make(row) for row in
+                   query(session).params(
+                       port_ids=port_ids)]
+        pf_fip_ids = self._get_port_forwarding_fip_ids(session)
+        if pf_fip_ids:
+            results = [r for r in results
+                       if r.floating_ip_id not in pf_fip_ids]
+        return results
+
+    def _get_port_forwarding_fip_ids(self, session):
+        """Return FIP IDs that have port forwarding rules.
+
+        These FIPs must NOT be distributed to compute nodes for 1:1 NAT;
+        they are handled by the port forwarding namespace agent instead.
+        """
+        try:
+            from neutron.db.models import port_forwarding as pf_models
+            query = session.query(
+                pf_models.PortForwarding.floatingip_id).distinct()
+            return {row[0] for row in query.all()}
+        except Exception:
+            return set()
 
     def _query_endpoint_snat_info(self, session, host, ext_net_ids):
         # REVISIT: Consider replacing this query with additional joins

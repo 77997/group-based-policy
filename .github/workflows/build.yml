@@ -1,0 +1,97 @@
+name: Build GBP Wheel
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install tox
+        run: pip install tox
+
+      - name: Run unit tests
+        run: tox -e py312 -- "gbpservice.neutron.tests.unit.services.(logapi|fwaas|metering|taas|vpn|portforwarding)\."
+        timeout-minutes: 30
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Fetch upstream tags
+        run: |
+          git fetch --tags https://github.com/noironetworks/group-based-policy.git
+
+      - name: Build wheel
+        run: |
+          pip install pbr wheel setuptools
+          BASE_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          export PBR_VERSION="${BASE_VERSION}.dev$(date -u +%Y%m%d%H%M%S)"
+          echo "Building with PBR_VERSION=${PBR_VERSION} (base: ${BASE_VERSION})"
+          python setup.py bdist_wheel
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: gbp-wheel
+          path: dist/*.whl
+          retention-days: 5
+
+  publish:
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: gbp-wheel
+          path: dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:10}"
+          TAG="gbp/${SHORT_SHA}"
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "GBP wheel ${SHORT_SHA}" \
+            --notes "group-based-policy wheel built from ${GITHUB_SHA}" \
+            dist/*.whl
+
+      - name: Cleanup old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName -q '.[].tagName' | \
+            grep '^gbp/' | tail -n +11 | \
+            while read -r tag; do
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+            done

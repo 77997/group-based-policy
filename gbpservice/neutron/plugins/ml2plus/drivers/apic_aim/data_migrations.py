@@ -139,7 +139,7 @@ def do_apic_aim_persist_migration(session):
 
     # REVISIT: needs to add support for context_reader/
     # context_writer
-    with session.begin(subtransactions=True):
+    with session.begin_nested():
         # Migrate address scopes.
         scope_dbs = (session.query(as_db.AddressScope)
                      .options(lazyload('*')).all())
@@ -277,7 +277,7 @@ def do_ap_name_change(session, conf=None):
     alembic_util.msg("APIC System ID: %s" % system_id)
     # REVISIT: needs to add support for context_reader/
     # context_writer
-    with session.begin(subtransactions=True):
+    with session.begin_nested():
         net_dbs = session.query(models_v2.Network).options(lazyload('*')).all()
         for net_db in net_dbs:
             ext_db = _get_network_extn_db(session, net_db.id)
@@ -371,7 +371,7 @@ def do_apic_aim_security_group_migration(session):
     mapper = apic_mapper.APICNameMapper()
     # REVISIT: needs to add support for context_reader/
     # context_writer
-    with session.begin(subtransactions=True):
+    with session.begin_nested():
         # Migrate SG.
         sg_dbs = (session.query(sg_models.SecurityGroup).
                   options(lazyload('*')).all())
@@ -445,7 +445,7 @@ def do_sg_rule_remote_group_id_insertion(session):
     mapper = apic_mapper.APICNameMapper()
     # REVISIT: needs to add support for context_reader/
     # context_writer
-    with session.begin(subtransactions=True):
+    with session.begin_nested():
         sg_rule_dbs = (session.query(sg_models.SecurityGroupRule).
                        options(lazyload('*')).all())
         for sg_rule_db in sg_rule_dbs:
@@ -477,7 +477,7 @@ def do_ha_ip_duplicate_entries_removal(session):
 
     # REVISIT: needs to add support for context_reader/
     # context_writer
-    with session.begin(subtransactions=True):
+    with session.begin_nested():
         port_and_haip_dbs = (session.query(models_v2.Port,
                              HAIPAddressToPortAssociation).join(
                              HAIPAddressToPortAssociation,
@@ -511,7 +511,7 @@ def do_ha_ip_network_id_insertion(session):
 
     # REVISIT: needs to add support for context_reader/
     # context_writer
-    with session.begin(subtransactions=True):
+    with session.begin_nested():
 
         port_and_haip_dbs = (session.query(models_v2.Port,
                              HAIPAddressToPortAssociation).join(
@@ -535,7 +535,7 @@ def do_hpp_insertion(session):
 
     # REVISIT: needs to add support for context_reader/
     # context_writer
-    with session.begin(subtransactions=True):
+    with session.begin_nested():
         session.execute(HPPDB.insert().values(hpp_normalized=False))
 
     alembic_util.msg(

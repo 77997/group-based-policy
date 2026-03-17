@@ -1796,7 +1796,7 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         # the identity_map and fixes the issue. This is being put in as
         # a workaround pending determination of the root cause.
         networks_db = (session.query(models_v2.Network).
-                       options(orm.noload('subnets')).
+                       options(orm.noload(models_v2.Network.subnets)).
                        filter(models_v2.Network.id.in_(net_ids)).all())
         net_map = {network['id']: network for network in networks_db}
 
@@ -7182,7 +7182,7 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         query = BAKERY(lambda s: s.query(
             models_v2.Network))
         query += lambda q: q.options(
-            orm.joinedload('segments'))
+            orm.joinedload(models_v2.Network.segments))
         net_dbs = {net_db.id: net_db
             for net_db in query(mgr.actual_session)}
 
@@ -7931,7 +7931,7 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         query = BAKERY(lambda s: s.query(
             models_v2.Port))
         query += lambda q: q.options(
-            orm.joinedload('binding_levels'))
+            orm.joinedload(models_v2.Port.binding_levels))
         for port in query(mgr.actual_session):
             binding = port.port_bindings[0] if port.port_bindings else None
             levels = port.binding_levels

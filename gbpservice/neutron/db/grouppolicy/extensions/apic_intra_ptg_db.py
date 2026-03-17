@@ -43,7 +43,7 @@ class ApicIntraPtgDBMixin(object):
 
     def set_intra_ptg_allow(self, session, policy_target_group_id,
                             intra_ptg_allow=True):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             query = BAKERY(lambda s: s.query(
                 ApicIntraPtgDB))
             query += lambda q: q.filter_by(
