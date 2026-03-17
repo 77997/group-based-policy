@@ -242,7 +242,7 @@ class ExtensionDbMixin(object):
         return port_res
 
     def set_port_extn_db(self, session, port_id, res_dict):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             if cisco_apic.ERSPAN_CONFIG in res_dict:
                 self._update_dict_attr(
                         session, PortExtensionErspanDb,
@@ -386,7 +386,7 @@ class ExtensionDbMixin(object):
         return net_res
 
     def set_network_extn_db(self, session, network_id, res_dict):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             query = BAKERY(lambda s: s.query(
                 NetworkExtensionDb))
             query += lambda q: q.filter_by(
@@ -695,7 +695,7 @@ class ExtensionDbMixin(object):
         # Updates are deletions with additions, so to ensure that
         # the delete happens before a subsequent addtion, we create
         # a subtransaction
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             for r in rows:
                 curr_obj = {key: r[key] for key in keys}
                 if curr_obj in new_values:
@@ -708,7 +708,7 @@ class ExtensionDbMixin(object):
             session.add(db_obj)
 
     def set_router_extn_db(self, session, router_id, res_dict):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             if cisco_apic_l3.EXTERNAL_PROVIDED_CONTRACTS in res_dict:
                 self._update_list_attr(session, RouterExtensionContractDb,
                    'contract_name',
@@ -721,13 +721,13 @@ class ExtensionDbMixin(object):
                     router_id=router_id, provides=False)
 
     def get_hpp_normalized(self, session):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             query = BAKERY(lambda s: s.query(HPPDb))
             db_obj = query(session).first()
             return db_obj['hpp_normalized']
 
     def set_hpp_normalized(self, session, hpp_normalized):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             query = BAKERY(lambda s: s.query(HPPDb))
             db_obj = query(session).first()
             db_obj['hpp_normalized'] = hpp_normalized

@@ -184,18 +184,13 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
     def _ml2_md_extend_network_dict(result, netdb):
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(netdb)
-        if session and db_api.is_session_active(session):
-            # REVISIT: Check if transaction begin is still
-            # required here, and if so, if reader pattern
-            # can be used instead (will require getting the
-            # current context, which should be available in
-            # the session.info's dictionary, with a key of
-            # 'using_context').
+        if not session:
+            session = db_api.get_reader_session()
+            netdb = session.merge(netdb, load=False)
             with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_network_dict(
                         session, netdb, result)
         else:
-            session = db_api.get_writer_session()
             plugin.extension_manager.extend_network_dict(
                     session, netdb, result)
 
@@ -205,31 +200,29 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
         netdb = results[0][1] if results else None
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(netdb)
-        if session and db_api.is_session_active(session):
+        if not session:
+            session = db_api.get_reader_session()
+            results = [(r, session.merge(db, load=False))
+                       for r, db in results]
             with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_network_dict_bulk(session,
                                                                   results)
         else:
-            session = db_api.get_writer_session()
-            plugin.extension_manager.extend_network_dict_bulk(session, results)
+            plugin.extension_manager.extend_network_dict_bulk(session,
+                                                              results)
 
     @staticmethod
     @resource_extend.extends([port_def.COLLECTION_NAME])
     def _ml2_md_extend_port_dict(result, portdb):
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(portdb)
-        if session and db_api.is_session_active(session):
-            # REVISIT: Check if transaction begin is still
-            # required here, and if so, if reader pattern
-            # can be used instead (will require getting the
-            # current context, which should be available in
-            # the session.info's dictionary, with a key of
-            # 'using_context').
+        if not session:
+            session = db_api.get_reader_session()
+            portdb = session.merge(portdb, load=False)
             with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_port_dict(
                         session, portdb, result)
         else:
-            session = db_api.get_writer_session()
             plugin.extension_manager.extend_port_dict(
                     session, portdb, result)
 
@@ -239,31 +232,29 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
         portdb = results[0][1] if results else None
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(portdb)
-        if session and db_api.is_session_active(session):
+        if not session:
+            session = db_api.get_reader_session()
+            results = [(r, session.merge(db, load=False))
+                       for r, db in results]
             with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_port_dict_bulk(session,
                                                                results)
         else:
-            session = db_api.get_writer_session()
-            plugin.extension_manager.extend_port_dict_bulk(session, results)
+            plugin.extension_manager.extend_port_dict_bulk(session,
+                                                           results)
 
     @staticmethod
     @resource_extend.extends([subnet_def.COLLECTION_NAME])
     def _ml2_md_extend_subnet_dict(result, subnetdb):
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(subnetdb)
-        if session and db_api.is_session_active(session):
-            # REVISIT: Check if transaction begin is still
-            # required here, and if so, if reader pattern
-            # can be used instead (will require getting the
-            # current context, which should be available in
-            # the session.info's dictionary, with a key of
-            # 'using_context').
-            with session.begin(subtransactions=True):
+        if not session:
+            session = db_api.get_reader_session()
+            subnetdb = session.merge(subnetdb, load=False)
+            with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_subnet_dict(
                         session, subnetdb, result)
         else:
-            session = db_api.get_writer_session()
             plugin.extension_manager.extend_subnet_dict(
                     session, subnetdb, result)
 
@@ -273,31 +264,29 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
         subnetdb = results[0][1] if results else None
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(subnetdb)
-        if session and db_api.is_session_active(session):
+        if not session:
+            session = db_api.get_reader_session()
+            results = [(r, session.merge(db, load=False))
+                       for r, db in results]
             with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_subnet_dict_bulk(session,
                                                                  results)
         else:
-            session = db_api.get_writer_session()
-            plugin.extension_manager.extend_subnet_dict_bulk(session, results)
+            plugin.extension_manager.extend_subnet_dict_bulk(session,
+                                                             results)
 
     @staticmethod
     @resource_extend.extends([subnetpool_def.COLLECTION_NAME])
     def _ml2_md_extend_subnetpool_dict(result, subnetpooldb):
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(subnetpooldb)
-        if session and db_api.is_session_active(session):
-            # REVISIT: Check if transaction begin is still
-            # required here, and if so, if reader pattern
-            # can be used instead (will require getting the
-            # current context, which should be available in
-            # the session.info's dictionary, with a key of
-            # 'using_context').
-            with session.begin(subtransactions=True):
+        if not session:
+            session = db_api.get_reader_session()
+            subnetpooldb = session.merge(subnetpooldb, load=False)
+            with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_subnetpool_dict(
                         session, subnetpooldb, result)
         else:
-            session = db_api.get_writer_session()
             plugin.extension_manager.extend_subnetpool_dict(
                     session, subnetpooldb, result)
 
@@ -307,12 +296,14 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
         subnetpooldb = results[0][1] if results else None
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(subnetpooldb)
-        if session and db_api.is_session_active(session):
+        if not session:
+            session = db_api.get_reader_session()
+            results = [(r, session.merge(db, load=False))
+                       for r, db in results]
             with db_api.CONTEXT_READER.using(session):
-                plugin.extension_manager.extend_subnetpool_dict_bulk(session,
-                                                                     results)
+                plugin.extension_manager.extend_subnetpool_dict_bulk(
+                        session, results)
         else:
-            session = db_api.get_writer_session()
             plugin.extension_manager.extend_subnetpool_dict_bulk(session,
                                                                  results)
 
@@ -321,18 +312,13 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
     def _ml2_md_extend_address_scope_dict(result, address_scope):
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(address_scope)
-        if session and db_api.is_session_active(session):
-            # REVISIT: Check if transaction begin is still
-            # required here, and if so, if reader pattern
-            # can be used instead (will require getting the
-            # current context, which should be available in
-            # the session.info's dictionary, with a key of
-            # 'using_context').
+        if not session:
+            session = db_api.get_reader_session()
+            address_scope = session.merge(address_scope, load=False)
             with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_address_scope_dict(
                         session, address_scope, result)
         else:
-            session = db_api.get_writer_session()
             plugin.extension_manager.extend_address_scope_dict(
                     session, address_scope, result)
 
@@ -342,14 +328,16 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
         address_scope = results[0][1] if results else None
         plugin = directory.get_plugin()
         session = db_api.get_session_from_obj(address_scope)
-        if session and db_api.is_session_active(session):
+        if not session:
+            session = db_api.get_reader_session()
+            results = [(r, session.merge(db, load=False))
+                       for r, db in results]
             with db_api.CONTEXT_READER.using(session):
                 plugin.extension_manager.extend_address_scope_dict_bulk(
                     session, results)
         else:
-            session = db_api.get_writer_session()
-            plugin.extension_manager.extend_address_scope_dict_bulk(session,
-                                                                    results)
+            plugin.extension_manager.extend_address_scope_dict_bulk(
+                session, results)
 
     # Base version does not call _apply_dict_extend_functions()
     def _make_address_scope_dict(self, address_scope, fields=None):
@@ -407,6 +395,16 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
                                  subnet_def.RESOURCE_NAME)
         return super(Ml2PlusPlugin, self).create_subnet_bulk(context,
                                                              subnets)
+
+    def _create_port_db(self, context, port):
+        with db_api.CONTEXT_WRITER.using(context):
+            result, mech_context = super(
+                    Ml2PlusPlugin, self)._create_port_db(
+                            context, port)
+            port_db = (context.session.query(models_v2.Port).
+                      filter_by(id=result['id']).one())
+            resource_extend.apply_funcs('ports', result, port_db)
+            return result, mech_context
 
     @n_utils.transaction_guard
     @db_api.retry_if_session_inactive()

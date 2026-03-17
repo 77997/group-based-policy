@@ -43,7 +43,7 @@ class ApicAutoPtgDBMixin(object):
 
     def set_is_auto_ptg(self, session, policy_target_group_id,
                         is_auto_ptg=False):
-        with session.begin(subtransactions=True):
+        with session.begin_nested():
             row = ApicAutoPtgDB(policy_target_group_id=policy_target_group_id,
                                 is_auto_ptg=is_auto_ptg)
             session.add(row)

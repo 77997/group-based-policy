@@ -90,7 +90,7 @@ class ImplicitSubnetpoolMixin(object):
             filters["tenant_id"] = [tenant]
         else:
             filters["shared"] = [True]
-        with context.session.begin(subtransactions=True):
+        with context.session.begin_nested():
             return self.get_subnetpools(admin_context, filters)
 
     def _get_implicit_subnetpool(self, context, subnetpool_id):
@@ -113,7 +113,7 @@ class ImplicitSubnetpoolMixin(object):
         is_implicit = False
         if validators.is_attr_set(subnetpool.get('is_implicit')):
             is_implicit = subnetpool['is_implicit']
-        with context.session.begin(subtransactions=True):
+        with context.session.begin_nested():
             if is_implicit:
                 # Verify feasibility. Only one implicit SP must exist per
                 # tenant (or global)
