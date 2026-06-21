@@ -1,0 +1,31 @@
+name: GBP CI
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install tox
+        run: pip install tox
+
+      - name: Run unit tests
+        run: tox -e py312 -- "gbpservice.neutron.tests.unit.services.(logapi|fwaas|metering|taas|vpn|portforwarding)\."
+        timeout-minutes: 30

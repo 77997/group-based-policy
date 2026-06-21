@@ -96,6 +96,7 @@ from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import rpc
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import trunk_driver
 
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import qos_driver
+from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import qos_rp
 
 # REVISIT: We need the aim_mapping policy driver's config until
 # advertise_mtu and nested_host_vlan are moved to the mechanism
@@ -232,6 +233,11 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
                           rpc.ApicRpcHandlerMixin):
     NIC_NAME_LEN = 14
 
+    # Namespace identifying apic_aim-owned Placement resource providers
+    # (QoS minimum-bandwidth / minimum-packet-rate scheduling). Declaring
+    # this marks the driver as a Placement resource-provider reporter.
+    resource_provider_uuid5_namespace = qos_rp.APIC_AIM_RP_NAMESPACE
+
     def __init__(self):
         LOG.info("APIC AIM MD __init__")
 
@@ -292,6 +298,42 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         self.apic_router_id_pool = cfg.CONF.ml2_apic_aim.apic_router_id_pool
         self.apic_router_id_subnet = netaddr.IPSet([self.apic_router_id_pool])
         self.qos_driver = qos_driver.register(self)
+        self._setup_qos_rp_reporter()
+
+    def _setup_qos_rp_reporter(self):
+        """Set up the Placement reporter for QoS min-bandwidth/packet-rate.
+
+        Best-effort and only active when resource_provider_bandwidths /
+        resource_provider_packet_processing are configured. The reporter
+        derives bandwidth resource providers from AIM HostLink and pushes
+        them to Placement so Nova can schedule minimum_bandwidth /
+        minimum_packet_rate ports (admission control; no ACI data-plane
+        guarantee).
+
+        NOTE (unvalidated): the Placement client wiring must be confirmed in
+        a lab. The reporter object is created here; a periodic task should
+        call ``self.qos_rp_reporter.report()`` to keep inventories fresh as
+        HostLinks change. We deliberately do not report() during init so a
+        Placement/keystone problem cannot break driver start-up.
+        """
+        self.qos_rp_reporter = None
+        if not qos_rp.is_enabled(cfg.CONF):
+            return
+        try:
+            from neutron_lib import context as n_context
+            from neutron_lib.placement import client as placement_client
+
+            def _aim_context_factory():
+                return aim_context.AimContext(
+                    n_context.get_admin_context().session)
+
+            self.qos_rp_reporter = qos_rp.ApicRpReporter(
+                self.aim, _aim_context_factory,
+                placement_client.PlacementAPIClient(cfg.CONF), cfg.CONF)
+            LOG.info("APIC AIM MD QoS Placement reporter enabled")
+        except Exception as e:
+            LOG.warning("APIC AIM MD QoS Placement reporter not initialized: "
+                        "%s", e)
 
     @property
     def connectivity(self):
@@ -700,10 +742,20 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         dscp = None
         egress_dpp_pol = None
         ingress_dpp_pol = None
+        # ACI's qosRequirement references a single data-plane policer
+        # (qosDppPol) per direction, and a qosDppPol is either bit-mode
+        # (bandwidth_limit) or packet-mode (packet_rate_limit). Track the
+        # directions already claimed by a policer so the two rule types
+        # cannot silently collide on the same direction.
+        dpp_directions = set()
         for rule in policy['rules']:
             if rule.rule_type == qos_consts.RULE_TYPE_DSCP_MARKING:
                 dscp = rule.dscp_mark
             elif rule.rule_type == qos_consts.RULE_TYPE_BANDWIDTH_LIMIT:
+                if rule.direction in dpp_directions:
+                    raise exceptions.QosConflictingDppPolicers(
+                        direction=rule.direction)
+                dpp_directions.add(rule.direction)
                 if rule.direction == 'egress':
                     egress_dpp_pol = rule.id
                     bw_rules.append({
@@ -723,6 +775,35 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
                         'name': rule.id, 'burst_unit': 'kilo',
                         'display_name': policy['name'] + '_ingress',
                         'rate_unit': 'kilo', 'rate': rule.max_kbps})
+            elif rule.rule_type == qos_consts.RULE_TYPE_PACKET_RATE_LIMIT:
+                # Packet-rate limiting maps to a qosDppPol in packet mode
+                # (rate/burst expressed in kilo-packets). Requires APIC
+                # 6.1(2)+ for PPS data-plane policing.
+                if rule.direction in dpp_directions:
+                    raise exceptions.QosConflictingDppPolicers(
+                        direction=rule.direction)
+                dpp_directions.add(rule.direction)
+                if rule.direction == 'egress':
+                    egress_dpp_pol = rule.id
+                    bw_rules.append({
+                        'egress': True,
+                        'mode': 'packet',
+                        'burst': str(rule.max_burst_kpps),
+                        'tenant_name': tenant_aname,
+                        'name': rule.id, 'burst_unit': 'kilo',
+                        'display_name': policy['name'] + '_egress',
+                        'rate_unit': 'kilo',
+                        'rate': rule.max_kpps})
+                elif rule.direction == 'ingress':
+                    ingress_dpp_pol = rule.id
+                    bw_rules.append({
+                        'egress': False,
+                        'mode': 'packet',
+                        'burst': str(rule.max_burst_kpps),
+                        'tenant_name': tenant_aname,
+                        'name': rule.id, 'burst_unit': 'kilo',
+                        'display_name': policy['name'] + '_ingress',
+                        'rate_unit': 'kilo', 'rate': rule.max_kpps})
 
         # REVIST: Should we just use self.aim.update() for update case then?
         if is_update:
