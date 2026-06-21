@@ -81,6 +81,51 @@ apic_opts = [
                       "this should only be used temporarily to enable "
                       "cleaning up overlapping routed subnets created before "
                       "overlap checking was implemented.")),
+    # --- QoS minimum-bandwidth / minimum-packet-rate (Placement) ---
+    # These mirror the ML2/OVS agent options but are consumed server-side
+    # by the apic_aim Placement reporter (the bandwidth-providing resource
+    # in ACI is the fabric leaf uplink the host attaches to, known from
+    # AIM HostLink, not a host-local bridge). See qos_rp.py.
+    cfg.ListOpt('resource_provider_bandwidths',
+                default=[],
+                help=("Comma-separated list of "
+                      "<physnet>:<egress_kbps>:<ingress_kbps> tuples "
+                      "describing the bandwidth each host's fabric uplink "
+                      "provides for a physnet. An empty egress/ingress means "
+                      "unlimited (no inventory reported for that direction). "
+                      "When set, apic_aim reports NET_BW_*_KILOBIT_PER_SEC "
+                      "inventories to Placement so Nova can schedule ports "
+                      "carrying minimum_bandwidth QoS rules.")),
+    cfg.ListOpt('resource_provider_packet_processing',
+                default=[],
+                help=("Comma-separated list of "
+                      "<physnet>:<egress_kpps>:<ingress_kpps> tuples "
+                      "describing the packet-rate capacity each host's "
+                      "fabric uplink provides for a physnet, used to report "
+                      "NET_PACKET_RATE_* inventories for minimum_packet_rate "
+                      "QoS rules.")),
+    cfg.DictOpt('resource_provider_inventory_defaults',
+                default={'allocation_ratio': 1.0,
+                         'min_unit': 1,
+                         'step_size': 1,
+                         'reserved': 0},
+                help=("Key:value pairs for the bandwidth resource provider "
+                      "inventory, applied to every reported inventory. Valid "
+                      "keys: allocation_ratio, min_unit, max_unit, step_size, "
+                      "reserved.")),
+    cfg.DictOpt('resource_provider_packet_processing_inventory_defaults',
+                default={'allocation_ratio': 1.0,
+                         'min_unit': 1,
+                         'step_size': 1,
+                         'reserved': 0},
+                help=("As resource_provider_inventory_defaults but for the "
+                      "packet-rate inventories.")),
+    cfg.DictOpt('resource_provider_hypervisors',
+                default={},
+                help=("Optional <physnet>:<hypervisor_name> overrides used "
+                      "to map a physnet's bandwidth resource provider to the "
+                      "Nova compute (hypervisor) resource provider. Defaults "
+                      "to the AIM HostLink host_name when not given.")),
 ]
 
 

@@ -124,6 +124,14 @@ class InvalidNetworkForPolicyEnforcementPref(exceptions.BadRequest):
                 "SVI network.")
 
 
+class QosConflictingDppPolicers(exceptions.BadRequest):
+    message = _("A QoS policy mapped to apic_aim can have at most one "
+                "rate-limiting rule (bandwidth_limit or packet_rate_limit) "
+                "per direction: ACI's qosRequirement references a single "
+                "data-plane policer per direction. Conflicting rules were "
+                "found for direction '%(direction)s'.")
+
+
 class InvalidNetworkForQos(exceptions.BadRequest):
     message = _("Cannot specify qos policy for "
                 "an external or SVI network.")
