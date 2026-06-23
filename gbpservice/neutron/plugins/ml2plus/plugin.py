@@ -18,6 +18,7 @@
 # modules save a reference to the functions being patched
 from gbpservice.neutron.extensions import patch  # noqa
 
+from neutron.api.rpc.agentnotifiers import utils as notifier_utils
 from neutron.common import utils as n_utils
 from neutron.db.models import securitygroup as securitygroups_db
 from neutron.db import models_v2
@@ -95,6 +96,10 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
         self.type_manager.initialize()
         self.extension_manager.initialize()
         self.mechanism_manager.initialize()
+        # Neutron 2026.1's Ml2Plugin.__init__ creates self.notifier
+        # (RPCNotifierHandler) before _start_rpc_notifiers() assigns its
+        # notifier_instance. We bypass that __init__, so replicate it here.
+        self.notifier = notifier_utils.RPCNotifierHandler()
         self._setup_dhcp()
         self._start_rpc_notifiers()
         self.add_agent_status_check_worker(self.agent_health_check)
