@@ -24,7 +24,9 @@ from neutron.db import models_v2
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import managers as ml2_managers
 from neutron.plugins.ml2 import plugin as ml2_plugin
+from neutron.plugins.ml2 import rpc as ml2_rpc
 from neutron.quota import resource_registry
+from neutron_lib.agent import topics
 from neutron_lib.api.definitions import address_scope as as_def
 from neutron_lib.api.definitions import network as net_def
 from neutron_lib.api.definitions import port as port_def
@@ -95,6 +97,13 @@ class Ml2PlusPlugin(ml2_plugin.Ml2Plugin,
         self.type_manager.initialize()
         self.extension_manager.initialize()
         self.mechanism_manager.initialize()
+        # We bypass Ml2Plugin.__init__ (to inject the extended managers),
+        # so we must reproduce its notifier setup. Upstream assigns
+        # self.notifier in _start_rpc_notifiers() as
+        # rpc.AgentNotifierApi(topics.AGENT); mirror it here so any early
+        # init path has it. _start_rpc_notifiers() below re-assigns an
+        # equivalent instance.
+        self.notifier = ml2_rpc.AgentNotifierApi(topics.AGENT)
         self._setup_dhcp()
         self._start_rpc_notifiers()
         self.add_agent_status_check_worker(self.agent_health_check)
