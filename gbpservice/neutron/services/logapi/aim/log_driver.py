@@ -19,9 +19,11 @@ from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 
-LOG = logging.getLogger(__name__)
+# Imported for its side effect of registering the ml2_apic_aim options, so
+# opflex_drop_log_dir resolves however this driver is loaded.
+from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import config  # noqa
 
-OPFLEX_DROP_LOG_DIR = '/var/lib/opflex-agent-ovs/droplog'
+LOG = logging.getLogger(__name__)
 
 EVENT_ACCEPT = 'ACCEPT'
 EVENT_DROP = 'DROP'
@@ -58,8 +60,11 @@ class AciPacketLogDriver(log_base.DriverBase):
             vif_types=[],
             vnic_types=[],
             supported_logging_types=self.SUPPORTED_LOGGING_TYPES)
-        self._log_dir = getattr(cfg.CONF, 'opflex_drop_log_dir',
-                                OPFLEX_DROP_LOG_DIR)
+        # NOTE: read through the registered ml2_apic_aim option rather than
+        # getattr on the top-level CONF. The option was never registered
+        # there, so the getattr always fell back to the constant and the
+        # directory could not be configured at all.
+        self._log_dir = cfg.CONF.ml2_apic_aim.opflex_drop_log_dir
 
     @staticmethod
     def create():

@@ -55,6 +55,15 @@ apic_opts = [
                 default=False,
                 help=("This will enable the iptables firewall implementation "
                       "on those compute nodes.")),
+    cfg.StrOpt('opflex_drop_log_dir',
+               default='/var/lib/opflex-agent-ovs/droplog',
+               help=("Directory the packet logging driver writes per-host "
+                     "drop-log configuration into, as <dir>/<host>/"
+                     "openstack.droplogcfg. The OpFlex agent reads these "
+                     "files on the compute node and reloads them via inotify, "
+                     "so this has to name storage reachable from both "
+                     "neutron-server and every compute for the Neutron "
+                     "logging API to have any effect.")),
     # TODO(kentwu): Need to define the external routed domain
     # AIM object instead.
     cfg.StrOpt('l3_domain_dn', default='',

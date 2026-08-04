@@ -5972,6 +5972,13 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         mapping = self._get_network_mapping(session, network['id'])
         return mapping and self._get_network_epg(mapping)
 
+    # Used by the FWaaS and metering service drivers, which build AIM
+    # resources under the same ApplicationProfile this driver creates for
+    # every project. project_id is accepted so the caller does not have to
+    # change if application profiles ever become per-project.
+    def get_aim_app_profile_name(self, project_id=None):
+        return self.ap_name
+
     def get_aim_domains(self, aim_ctx):
         vmms = [{'name': x.name, 'type': x.type}
                 for x in self.aim.find(aim_ctx, aim_resource.VMMDomain)
