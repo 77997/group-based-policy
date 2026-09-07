@@ -21,11 +21,16 @@ from gbpservice.neutron.tests.unit.services.grouppolicy import (
     test_aim_mapping_driver as test_aim_base)
 from neutron.objects.qos import policy as policy_object
 from neutron.objects.qos import rule as rule_object
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import context
 from neutron_lib.plugins import directory
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 
+from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import (
+    exceptions as aim_qos_exc)
+from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import (
+    mechanism_driver as md)
 from gbpservice.neutron.services.grouppolicy import config
 
 LOG = logging.getLogger(__name__)
@@ -73,7 +78,17 @@ class TestAIMQosBase(test_aim_base.AIMBaseTestCase):
                 'max_kbps': 101,
                 'max_burst_kbps': 1150},
             'dscp_marking_rule': {'id': uuidutils.generate_uuid(),
-                                  'dscp_mark': 16}, }
+                                  'dscp_mark': 16},
+            'egress_packet_rate_limit_rule': {
+                'id': uuidutils.generate_uuid(),
+                'direction': 'egress',
+                'max_kpps': 200,
+                'max_burst_kpps': 250},
+            'ingress_packet_rate_limit_rule': {
+                'id': uuidutils.generate_uuid(),
+                'direction': 'ingress',
+                'max_kpps': 201,
+                'max_burst_kpps': 2150}, }
 
         self.egress_rule = rule_object.QosBandwidthLimitRule(
             self.ctxt, **self.rule_data['egress_bandwidth_limit_rule'])
@@ -83,6 +98,12 @@ class TestAIMQosBase(test_aim_base.AIMBaseTestCase):
 
         self.dscp_rule = rule_object.QosDscpMarkingRule(
             self.ctxt, **self.rule_data['dscp_marking_rule'])
+
+        self.egress_pps_rule = rule_object.QosPacketRateLimitRule(
+            self.ctxt, **self.rule_data['egress_packet_rate_limit_rule'])
+
+        self.ingress_pps_rule = rule_object.QosPacketRateLimitRule(
+            self.ctxt, **self.rule_data['ingress_packet_rate_limit_rule'])
 
     def tearDown(self):
         super(TestAIMQosBase, self).tearDown()
@@ -165,6 +186,68 @@ class TestQosPolicy(TestAIMQosBase):
         pol = self.aim_mgr.get(self._aim_context, pol)
         self.assertIsNone(pol)
 
+    def test_create_delete_update_policy_packet_rate(self):
+        _policy = policy_object.QosPolicy(
+            self.ctxt, **self.policy_data['policy'])
+        _policy.create()
+        self.qos_driver.create_policy_precommit(self.ctxt, _policy)
+        tenant_name = 'prj_' + self.ctxt.tenant_id
+        pol = aim_res.QosRequirement(name=_policy.id, tenant_name=tenant_name)
+        pol = self.aim_mgr.get(self._aim_context, pol)
+        self.assertIsNotNone(pol)
+
+        # Test packet-rate-limit rules
+        setattr(_policy, "rules",
+                [self.egress_pps_rule, self.ingress_pps_rule])
+        self.qos_driver.update_policy_precommit(self.ctxt, _policy)
+        pol = self.aim_mgr.get(self._aim_context, pol)
+        self.assertIsNotNone(pol)
+        self.assertEqual(pol.egress_dpp_pol, self.egress_pps_rule.id)
+        self.assertEqual(pol.ingress_dpp_pol, self.ingress_pps_rule.id)
+
+        egress_pps = aim_res.QosDppPol(
+            name=self.egress_pps_rule.id, tenant_name=tenant_name)
+        egress_pps = self.aim_mgr.get(self._aim_context, egress_pps)
+        self.assertIsNotNone(egress_pps)
+        self.assertEqual(egress_pps.mode, 'packet')
+        self.assertEqual(egress_pps.burst,
+                         str(self.egress_pps_rule.max_burst_kpps))
+        self.assertEqual(int(egress_pps.rate), self.egress_pps_rule.max_kpps)
+
+        ingress_pps = aim_res.QosDppPol(
+            name=self.ingress_pps_rule.id, tenant_name=tenant_name)
+        ingress_pps = self.aim_mgr.get(self._aim_context, ingress_pps)
+        self.assertIsNotNone(ingress_pps)
+        self.assertEqual(ingress_pps.mode, 'packet')
+        self.assertEqual(ingress_pps.burst,
+                         str(self.ingress_pps_rule.max_burst_kpps))
+        self.assertEqual(int(ingress_pps.rate), self.ingress_pps_rule.max_kpps)
+
+        # Clean up the rules
+        setattr(_policy, "rules", [])
+        self.qos_driver.update_policy_precommit(self.ctxt, _policy)
+        pol = self.aim_mgr.get(self._aim_context, pol)
+        self.assertIsNone(pol.egress_dpp_pol)
+        self.assertIsNone(pol.ingress_dpp_pol)
+        self.assertIsNone(self.aim_mgr.get(self._aim_context, egress_pps))
+        self.assertIsNone(self.aim_mgr.get(self._aim_context, ingress_pps))
+
+        self.qos_driver.delete_policy_precommit(self.ctxt, _policy)
+        self.assertIsNone(self.aim_mgr.get(self._aim_context, pol))
+
+    def test_conflicting_dpp_policers_same_direction(self):
+        # A bandwidth_limit and a packet_rate_limit rule on the same
+        # direction cannot both be expressed by ACI's qosRequirement
+        # (single data-plane policer per direction), so it is rejected.
+        _policy = policy_object.QosPolicy(
+            self.ctxt, **self.policy_data['policy'])
+        _policy.create()
+        self.qos_driver.create_policy_precommit(self.ctxt, _policy)
+        setattr(_policy, "rules", [self.egress_rule, self.egress_pps_rule])
+        self.assertRaises(
+            aim_qos_exc.QosConflictingDppPolicers,
+            self.qos_driver.update_policy_precommit, self.ctxt, _policy)
+
     def _make_qos_policy(self):
         qos_policy = policy_object.QosPolicy(
             self.admin_ctxt, **self.policy_data['policy'])
@@ -186,6 +269,15 @@ class TestQosPolicy(TestAIMQosBase):
         self._update('networks', network['network']['id'], data)
         epg = self.aim_mgr.get(self._aim_context, epg)
         self.assertIsNone(epg.qos_name)
+
+    def test_fabric_vif_type_is_claimed(self):
+        # Router-interface ports are bound with VIF_TYPE_FABRIC. Neutron
+        # validates a network-level QoS policy against every port on the
+        # network, so if this driver does not claim that vif_type, attaching a
+        # policy to any network with a router fails with
+        # "Rule bandwidth_limit is not supported by port <uuid>".
+        self.assertIn(md.VIF_TYPE_FABRIC, self.qos_driver.vif_types)
+        self.assertIn(portbindings.VIF_TYPE_OVS, self.qos_driver.vif_types)
 
     def test_port_qos_gbpDetailsForML2(self):
         self._register_agent('host1', test_aim_md.AGENT_CONF_OPFLEX)

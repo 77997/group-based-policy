@@ -87,6 +87,8 @@ from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import (
     constants as aim_cst)
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import apic_mapper
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import cache
+from gbpservice.neutron.services.logapi.aim import (
+    log_driver as aim_log_driver)
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import config  # noqa
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import data_migrations
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import db
@@ -99,6 +101,7 @@ from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import rpc
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import trunk_driver
 
 from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import qos_driver
+from gbpservice.neutron.plugins.ml2plus.drivers.apic_aim import qos_rp
 
 # REVISIT: We need the aim_mapping policy driver's config until
 # advertise_mtu and nested_host_vlan are moved to the mechanism
@@ -241,11 +244,39 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
                           distributed_snat_helper.DistributedSnatHelper):
     NIC_NAME_LEN = 14
 
+    # Namespace identifying apic_aim-owned Placement resource providers
+    # (QoS minimum-bandwidth / minimum-packet-rate scheduling). Declaring
+    # this marks the driver as a Placement resource-provider reporter.
+    resource_provider_uuid5_namespace = qos_rp.APIC_AIM_RP_NAMESPACE
+
     def __init__(self):
         LOG.info("APIC AIM MD __init__")
 
     def initialize(self):
         LOG.info("APIC AIM MD initializing")
+        # NOTE: the packet logging driver is deliberately NOT registered.
+        #
+        # Registering it makes the Neutron logging API accept
+        # "openstack network log create --resource-type security_group" and
+        # do nothing. The driver sets hostprotRule.action="log,permit" on the
+        # AIM rules, AIM reports synced with zero faults - and APIC silently
+        # discards the log bit, storing action="permit". Verified by reading
+        # the MO back from the fabric with an admin account. The OpFlex agent
+        # therefore resolves no gbp:LogAction, pc->getLog() stays false, and
+        # permitLog never fires. Cisco documents the same limitation as
+        # "Permit Logging is not supported".
+        #
+        # An API that accepts a request and changes nothing is worse than one
+        # that refuses: unregistered, the plugin reports no supported logging
+        # types and the request is rejected, which is the truth. Deny logging
+        # is unaffected and works - it is host-wide drop logging, enabled by
+        # opflex_drop_log_enable in kolla-ansible, and needs nothing from the
+        # policy path.
+        #
+        # Re-enable by restoring this single call if APIC ever renders the bit;
+        # everything behind it (the driver, the AIM action attribute, the
+        # agent's permitLog) is already in place and tested.
+        # aim_log_driver.register()
         self.project_details_cache = cache.ProjectDetailsCache()
         self.name_mapper = apic_mapper.APICNameMapper()
         self.aim = aim_manager.AimManager()
@@ -301,6 +332,42 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         self.apic_router_id_pool = cfg.CONF.ml2_apic_aim.apic_router_id_pool
         self.apic_router_id_subnet = netaddr.IPSet([self.apic_router_id_pool])
         self.qos_driver = qos_driver.register(self)
+        self._setup_qos_rp_reporter()
+
+    def _setup_qos_rp_reporter(self):
+        """Set up the Placement reporter for QoS min-bandwidth/packet-rate.
+
+        Best-effort and only active when resource_provider_bandwidths /
+        resource_provider_packet_processing are configured. The reporter
+        derives bandwidth resource providers from AIM HostLink and pushes
+        them to Placement so Nova can schedule minimum_bandwidth /
+        minimum_packet_rate ports (admission control; no ACI data-plane
+        guarantee).
+
+        NOTE (unvalidated): the Placement client wiring must be confirmed in
+        a lab. The reporter object is created here; a periodic task should
+        call ``self.qos_rp_reporter.report()`` to keep inventories fresh as
+        HostLinks change. We deliberately do not report() during init so a
+        Placement/keystone problem cannot break driver start-up.
+        """
+        self.qos_rp_reporter = None
+        if not qos_rp.is_enabled(cfg.CONF):
+            return
+        try:
+            from neutron_lib import context as n_context
+            from neutron_lib.placement import client as placement_client
+
+            def _aim_context_factory():
+                return aim_context.AimContext(
+                    n_context.get_admin_context().session)
+
+            self.qos_rp_reporter = qos_rp.ApicRpReporter(
+                self.aim, _aim_context_factory,
+                placement_client.PlacementAPIClient(cfg.CONF), cfg.CONF)
+            LOG.info("APIC AIM MD QoS Placement reporter enabled")
+        except Exception as e:
+            LOG.warning("APIC AIM MD QoS Placement reporter not initialized: "
+                        "%s", e)
 
     @property
     def connectivity(self):
@@ -701,6 +768,35 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
             raise exceptions.InvalidPreexistingBdForNetwork()
         return aim_bd
 
+    def _check_qos_policy_tenant(self, context, network):
+        """Refuse a network QoS policy owned by another project.
+
+        A network's QoS is rendered as fvRsQosRequirement, which carries only
+        tnQosRequirementName - APIC resolves that name inside the network's own
+        ACI tenant. apic_aim creates the QosRequirement in the project that owns
+        the POLICY, so a shared policy attached to another project's network
+        names an object that does not exist in that tenant: APIC resolves
+        nothing, no fault is raised, and the network silently has no QoS.
+
+        The port-level path does not have this problem - _build_qos_details
+        sends an explicit policy-space derived from the policy's own project -
+        so ports remain a working alternative.
+        """
+        policy_id = network.get(qos_consts.QOS_POLICY_ID)
+        if not policy_id:
+            return
+        qos_plugin = directory.get_plugin(pconst.QOS)
+        if not qos_plugin:
+            return
+        policy = qos_plugin.get_policy(context._plugin_context, policy_id)
+        policy_project = policy.get('project_id') or policy.get('tenant_id')
+        network_project = network.get('project_id') or network.get('tenant_id')
+        if policy_project and network_project and \
+                policy_project != network_project:
+            raise exceptions.CrossTenantQosPolicyForNetwork(
+                policy_id=policy_id, policy_project=policy_project,
+                network_project=network_project)
+
     def _handle_qos_policy(self, context, policy, is_update=False):
         session = context.session
         aim_ctx = aim_context.AimContext(session)
@@ -709,10 +805,20 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
         dscp = None
         egress_dpp_pol = None
         ingress_dpp_pol = None
+        # ACI's qosRequirement references a single data-plane policer
+        # (qosDppPol) per direction, and a qosDppPol is either bit-mode
+        # (bandwidth_limit) or packet-mode (packet_rate_limit). Track the
+        # directions already claimed by a policer so the two rule types
+        # cannot silently collide on the same direction.
+        dpp_directions = set()
         for rule in policy['rules']:
             if rule.rule_type == qos_consts.RULE_TYPE_DSCP_MARKING:
                 dscp = rule.dscp_mark
             elif rule.rule_type == qos_consts.RULE_TYPE_BANDWIDTH_LIMIT:
+                if rule.direction in dpp_directions:
+                    raise exceptions.QosConflictingDppPolicers(
+                        direction=rule.direction)
+                dpp_directions.add(rule.direction)
                 if rule.direction == 'egress':
                     egress_dpp_pol = rule.id
                     bw_rules.append({
@@ -732,6 +838,35 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
                         'name': rule.id, 'burst_unit': 'kilo',
                         'display_name': policy['name'] + '_ingress',
                         'rate_unit': 'kilo', 'rate': rule.max_kbps})
+            elif rule.rule_type == qos_consts.RULE_TYPE_PACKET_RATE_LIMIT:
+                # Packet-rate limiting maps to a qosDppPol in packet mode
+                # (rate/burst expressed in kilo-packets). Requires APIC
+                # 6.1(2)+ for PPS data-plane policing.
+                if rule.direction in dpp_directions:
+                    raise exceptions.QosConflictingDppPolicers(
+                        direction=rule.direction)
+                dpp_directions.add(rule.direction)
+                if rule.direction == 'egress':
+                    egress_dpp_pol = rule.id
+                    bw_rules.append({
+                        'egress': True,
+                        'mode': 'packet',
+                        'burst': str(rule.max_burst_kpps),
+                        'tenant_name': tenant_aname,
+                        'name': rule.id, 'burst_unit': 'kilo',
+                        'display_name': policy['name'] + '_egress',
+                        'rate_unit': 'kilo',
+                        'rate': rule.max_kpps})
+                elif rule.direction == 'ingress':
+                    ingress_dpp_pol = rule.id
+                    bw_rules.append({
+                        'egress': False,
+                        'mode': 'packet',
+                        'burst': str(rule.max_burst_kpps),
+                        'tenant_name': tenant_aname,
+                        'name': rule.id, 'burst_unit': 'kilo',
+                        'display_name': policy['name'] + '_ingress',
+                        'rate_unit': 'kilo', 'rate': rule.max_kpps})
 
         # REVIST: Should we just use self.aim.update() for update case then?
         if is_update:
@@ -853,6 +988,8 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
 
         if (current.get(qos_consts.QOS_POLICY_ID) and (is_ext or is_svi)):
             raise exceptions.InvalidNetworkForQos()
+
+        self._check_qos_policy_tenant(context, current)
 
         if is_ext:
             l3out, ext_net, ns = self._get_aim_nat_strategy(current)
@@ -1011,6 +1148,8 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
 
         if (current.get(qos_consts.QOS_POLICY_ID) and (is_ext or is_svi)):
             raise exceptions.InvalidNetworkForQos()
+
+        self._check_qos_policy_tenant(context, current)
 
         # Update name if changed. REVISIT: Remove is_ext from
         # condition and add UT for updating external network name.
@@ -4779,8 +4918,20 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
             to_port=(sg_rule['port_range_max']
                      if sg_rule['port_range_max'] else 'unspecified'),
             tDn=dn,
-            remote_group_id=remote_group_id)
+            remote_group_id=remote_group_id,
+            **self._sg_rule_log_kwargs(context._plugin_context,
+                                       sg_rule['security_group_id']))
         self.aim.create(aim_ctx, sg_rule_aim)
+
+    def _sg_rule_log_kwargs(self, context, sg_id):
+        """action= for a new AIM SG rule, or {} when logging is not in play.
+
+        Kept as kwargs rather than a value so that with the logging service
+        plugin absent nothing is passed at all and AIM's own default stands,
+        rather than this path having an opinion about the fabric default.
+        """
+        action = aim_log_driver.action_for_security_group(context, sg_id)
+        return {'action': action} if action else {}
 
     def delete_security_group_rule_precommit(self, context):
         session = context._plugin_context.session
@@ -5890,6 +6041,13 @@ class ApicMechanismDriver(api_plus.MechanismDriver,
     def get_epg_for_network(self, session, network):
         mapping = self._get_network_mapping(session, network['id'])
         return mapping and self._get_network_epg(mapping)
+
+    # Used by the FWaaS and metering service drivers, which build AIM
+    # resources under the same ApplicationProfile this driver creates for
+    # every project. project_id is accepted so the caller does not have to
+    # change if application profiles ever become per-project.
+    def get_aim_app_profile_name(self, project_id=None):
+        return self.ap_name
 
     def get_aim_domains(self, aim_ctx):
         vmms = [{'name': x.name, 'type': x.type}

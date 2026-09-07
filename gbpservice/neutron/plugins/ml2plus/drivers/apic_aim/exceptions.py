@@ -124,6 +124,26 @@ class InvalidNetworkForPolicyEnforcementPref(exceptions.BadRequest):
                 "SVI network.")
 
 
+class QosConflictingDppPolicers(exceptions.BadRequest):
+    message = _("A QoS policy mapped to apic_aim can have at most one "
+                "rate-limiting rule (bandwidth_limit or packet_rate_limit) "
+                "per direction: ACI's qosRequirement references a single "
+                "data-plane policer per direction. Conflicting rules were "
+                "found for direction '%(direction)s'.")
+
+
+class CrossTenantQosPolicyForNetwork(exceptions.BadRequest):
+    message = _("QoS policy %(policy_id)s belongs to project "
+                "%(policy_project)s and cannot be applied to a network in "
+                "project %(network_project)s. A network's QoS is rendered as "
+                "an fvRsQosRequirement carrying only a name, which APIC "
+                "resolves inside the network's own ACI tenant, so a policy "
+                "owned by another project resolves to nothing and is silently "
+                "not applied. Attach the policy to ports instead, which "
+                "carries an explicit policy space, or create the policy in "
+                "the network's own project.")
+
+
 class InvalidNetworkForQos(exceptions.BadRequest):
     message = _("Cannot specify qos policy for "
                 "an external or SVI network.")

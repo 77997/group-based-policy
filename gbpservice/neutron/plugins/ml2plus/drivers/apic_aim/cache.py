@@ -59,7 +59,11 @@ class ProjectDetailsCache(object):
                         AUTH_GROUP)
         session = ks_session.Session(auth=auth)
         LOG.debug("Got session: %s", session)
-        self.keystone = ksc_client.Client(session=session)
+        self.keystone = ksc_client.Client(
+            session=session,
+            interface=('internal'
+                       if self.enable_neutronclient_internal_ep_interface
+                       else 'public'))
         LOG.debug("Got keystone client: %s", self.keystone)
         endpoint_type = 'publicURL'
         if self.enable_neutronclient_internal_ep_interface:

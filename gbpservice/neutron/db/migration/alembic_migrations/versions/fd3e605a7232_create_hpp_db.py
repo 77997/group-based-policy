@@ -40,8 +40,7 @@ def upgrade():
              data_migrations)
 
         session = sa.orm.Session(bind=bind)
-        with session.begin():
-            data_migrations.do_hpp_insertion(session)
+        data_migrations.do_hpp_insertion(session)
     except Exception as e:
         util.warn("Caught exception while migrating data in %s: %s" %
             ('apic_aim_hpp', e))
